@@ -1,18 +1,29 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { transcribeAudio } from './services/geminiService';
 import { fileToBase64 } from './utils/fileUtils';
 import FileUploader from './components/FileUploader';
 import TranscriptionDisplay from './components/TranscriptionDisplay';
 import ProgressBar from './components/ProgressBar';
 import MicrophoneInput from './components/MicrophoneInput';
+import SavedTranscriptions from './components/SavedTranscriptions';
 import { FileAudioIcon } from './components/icons/FileAudioIcon';
 import { MicrophoneIcon } from './components/icons/MicrophoneIcon';
 import { UploadIcon } from './components/icons/UploadIcon';
+import { ArchiveIcon } from './components/icons/ArchiveIcon';
+import { SparklesIcon } from './components/icons/SparklesIcon';
 
 
 type Status = 'idle' | 'processing' | 'success' | 'error';
 type InputType = 'file' | 'microphone';
+type ActiveView = 'extractor' | 'saved';
+
+export interface Transcription {
+  id: number;
+  text: string;
+  fileName: string;
+  savedAt: string;
+}
 
 
 const App: React.FC = () => {
@@ -22,6 +33,46 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isTranscriptionComplete, setIsTranscriptionComplete] = useState(false);
   const [inputType, setInputType] = useState<InputType>('file');
+  const [activeView, setActiveView] = useState<ActiveView>('extractor');
+  const [savedTranscriptions, setSavedTranscriptions] = useState<Transcription[]>([]);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('savedTranscriptions');
+      if (stored) {
+        setSavedTranscriptions(JSON.parse(stored));
+      }
+    } catch (e) {
+      console.error("Fehler beim Laden der Transkriptionen aus dem localStorage", e);
+      setSavedTranscriptions([]);
+    }
+  }, []);
+
+  const handleSaveTranscription = useCallback(() => {
+    if (!transcription || !file) return;
+
+    const newSavedItem: Transcription = {
+      id: Date.now(),
+      text: transcription,
+      fileName: file.name,
+      savedAt: new Date().toISOString(),
+    };
+
+    setSavedTranscriptions(prev => {
+      const updated = [newSavedItem, ...prev];
+      localStorage.setItem('savedTranscriptions', JSON.stringify(updated));
+      return updated;
+    });
+  }, [transcription, file]);
+  
+  const handleDeleteTranscription = useCallback((id: number) => {
+    setSavedTranscriptions(prev => {
+      const updated = prev.filter(t => t.id !== id);
+      localStorage.setItem('savedTranscriptions', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
 
   const handleFileChange = (selectedFile: File | null) => {
     if (selectedFile) {
@@ -80,13 +131,18 @@ const App: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   }
 
-  const renderContent = () => {
+  const renderExtractorContent = () => {
     if (status === 'processing') {
       return <ProgressBar isComplete={isTranscriptionComplete} />;
     }
 
     if (status === 'success') {
-      return <TranscriptionDisplay transcription={transcription} fileName={file?.name || 'transkription'} onReset={resetState} />;
+      return <TranscriptionDisplay 
+                transcription={transcription} 
+                fileName={file?.name || 'transkription'} 
+                onReset={resetState}
+                onSave={handleSaveTranscription}
+             />;
     }
 
     // Idle or Error status
@@ -142,38 +198,63 @@ const App: React.FC = () => {
             Audio-zu-Text Extraktor
           </h1>
           <p className="text-center text-gray-400 mt-2">
-            Wandle gesprochene Sprache aus Audiodateien oder dem Mikrofon in Text um.
+            Wandle gesprochene Sprache aus Audioquellen in Text um und speichere deine Ergebnisse.
           </p>
         </header>
 
+         <div className="flex w-full border-b border-gray-600 bg-gray-700/20">
+            <button 
+                onClick={() => setActiveView('extractor')}
+                className={`flex-1 py-3 text-center font-semibold transition-colors duration-300 flex items-center justify-center gap-2 ${activeView === 'extractor' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-gray-800/50' : 'text-gray-400 hover:text-white hover:bg-gray-700/50'}`}
+            >
+                <SparklesIcon className="w-5 h-5" />
+                Extraktor
+            </button>
+            <button 
+                onClick={() => setActiveView('saved')}
+                className={`flex-1 py-3 text-center font-semibold transition-colors duration-300 flex items-center justify-center gap-2 ${activeView === 'saved' ? 'text-indigo-400 border-b-2 border-indigo-400 bg-gray-800/50' : 'text-gray-400 hover:text-white hover:bg-gray-700/50'}`}
+            >
+                <ArchiveIcon className="w-5 h-5" />
+                Gespeicherte Transkriptionen
+                {savedTranscriptions.length > 0 && (
+                    <span className="ml-2 bg-indigo-600 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">{savedTranscriptions.length}</span>
+                )}
+            </button>
+        </div>
+
+
         <main className="p-6 sm:p-8">
-          {renderContent()}
-
-          {status === 'error' && error && (
-            <div className="mt-4 text-center bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg" role="alert">
-              <strong className="font-bold">Fehler: </strong>
-              <span className="block sm:inline">{error}</span>
-            </div>
+          {activeView === 'extractor' ? (
+            <>
+              {renderExtractorContent()}
+              {status === 'error' && error && (
+                <div className="mt-4 text-center bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg" role="alert">
+                  <strong className="font-bold">Fehler: </strong>
+                  <span className="block sm:inline">{error}</span>
+                </div>
+              )}
+              {file && !['processing', 'success'].includes(status) && (
+                 <div className="mt-6 flex flex-col sm:flex-row gap-4">
+                   <button
+                      onClick={handleTranscription}
+                      disabled={status === 'processing'}
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-indigo-500/50 disabled:bg-gray-500 disabled:cursor-not-allowed disabled:transform-none"
+                    >
+                      Transkribieren
+                    </button>
+                    <button
+                      onClick={resetState}
+                      className="w-full sm:w-auto bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg transition-colors duration-300 ease-in-out"
+                    >
+                      Abbrechen
+                    </button>
+                </div>
+              )}
+            </>
+          ) : (
+             <SavedTranscriptions transcriptions={savedTranscriptions} onDelete={handleDeleteTranscription} />
           )}
 
-          {/* FIX: Use !includes to prevent TS from narrowing status type, which caused a type error on the disabled prop check. */}
-          {file && !['processing', 'success'].includes(status) && (
-             <div className="mt-6 flex flex-col sm:flex-row gap-4">
-               <button
-                  onClick={handleTranscription}
-                  disabled={status === 'processing'}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-lg transition-all duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-4 focus:ring-indigo-500/50 disabled:bg-gray-500 disabled:cursor-not-allowed disabled:transform-none"
-                >
-                  Transkribieren
-                </button>
-                <button
-                  onClick={resetState}
-                  className="w-full sm:w-auto bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg transition-colors duration-300 ease-in-out"
-                >
-                  Abbrechen
-                </button>
-            </div>
-          )}
         </main>
       </div>
        <footer className="text-center mt-8 text-gray-500 text-sm">
