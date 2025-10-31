@@ -1,12 +1,13 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { transcribeAudio } from './services/geminiService';
+import { transcribeAudio, postProcessTranscription } from './services/geminiService';
 import { fileToBase64 } from './utils/fileUtils';
 import FileUploader from './components/FileUploader';
 import TranscriptionDisplay from './components/TranscriptionDisplay';
 import ProgressBar from './components/ProgressBar';
 import MicrophoneInput from './components/MicrophoneInput';
 import SavedTranscriptions from './components/SavedTranscriptions';
+import TranscriptionSettings from './components/TranscriptionSettings';
 import { FileAudioIcon } from './components/icons/FileAudioIcon';
 import { MicrophoneIcon } from './components/icons/MicrophoneIcon';
 import { UploadIcon } from './components/icons/UploadIcon';
@@ -17,6 +18,7 @@ import { SparklesIcon } from './components/icons/SparklesIcon';
 type Status = 'idle' | 'processing' | 'success' | 'error';
 type InputType = 'file' | 'microphone';
 type ActiveView = 'extractor' | 'saved';
+type Model = 'flash' | 'pro';
 
 export interface Transcription {
   id: number;
@@ -35,6 +37,12 @@ const App: React.FC = () => {
   const [inputType, setInputType] = useState<InputType>('file');
   const [activeView, setActiveView] = useState<ActiveView>('extractor');
   const [savedTranscriptions, setSavedTranscriptions] = useState<Transcription[]>([]);
+
+  // New state for settings
+  const [model, setModel] = useState<Model>('flash');
+  const [postProcess, setPostProcess] = useState(true);
+  const [statusText, setStatusText] = useState('Vorbereitung...');
+
 
   useEffect(() => {
     try {
@@ -98,9 +106,19 @@ const App: React.FC = () => {
       const { base64Data, mimeType } = await fileToBase64(file);
       
       const prompt = "Transkribiere den folgenden gesprochenen Text. Gib nur die Transkription aus, ohne zusätzliche Kommentare oder Formatierungen.";
+      
+      const selectedModel = model === 'pro' ? 'gemini-2.5-pro' : 'gemini-2.5-flash';
 
-      const result = await transcribeAudio(prompt, base64Data, mimeType);
-      setTranscription(result);
+      setStatusText('Transkription wird erstellt...');
+      let initialTranscription = await transcribeAudio(prompt, base64Data, mimeType, selectedModel);
+
+      let finalTranscription = initialTranscription;
+      if (postProcess) {
+        setStatusText('Ergebnisse werden verbessert...');
+        finalTranscription = await postProcessTranscription(initialTranscription);
+      }
+
+      setTranscription(finalTranscription);
       setIsTranscriptionComplete(true);
 
       // Allow time for the progress bar to animate to 100%
@@ -113,7 +131,7 @@ const App: React.FC = () => {
       setError('Ein Fehler ist aufgetreten. Bitte versuche es erneut.');
       setStatus('error');
     }
-  }, [file]);
+  }, [file, model, postProcess]);
 
   const resetState = () => {
     setFile(null);
@@ -133,7 +151,7 @@ const App: React.FC = () => {
 
   const renderExtractorContent = () => {
     if (status === 'processing') {
-      return <ProgressBar isComplete={isTranscriptionComplete} />;
+      return <ProgressBar isComplete={isTranscriptionComplete} statusText={statusText} />;
     }
 
     if (status === 'success') {
@@ -148,16 +166,24 @@ const App: React.FC = () => {
     // Idle or Error status
     if (file) {
       return (
-        <div className="w-full text-center p-6 border-2 border-dashed border-gray-600 rounded-lg bg-gray-700/50">
-           <FileAudioIcon className="w-16 h-16 mx-auto text-indigo-400 mb-4" />
-           <p className="text-lg font-semibold text-gray-200">{file.name}</p>
-           <p className="text-sm text-gray-400">{formatFileSize(file.size)}</p>
-           {file.type.startsWith('video/') && (
-             <div className="mt-4 text-sm bg-yellow-900/50 border border-yellow-700 text-yellow-300 px-4 py-2 rounded-lg">
-               <strong>Hinweis:</strong> Aus Videodateien wird nur die Audiospur für die Transkription verwendet.
-             </div>
-           )}
-        </div>
+        <>
+            <div className="w-full text-center p-6 border-2 border-dashed border-gray-600 rounded-lg bg-gray-700/50">
+               <FileAudioIcon className="w-16 h-16 mx-auto text-indigo-400 mb-4" />
+               <p className="text-lg font-semibold text-gray-200">{file.name}</p>
+               <p className="text-sm text-gray-400">{formatFileSize(file.size)}</p>
+               {file.type.startsWith('video/') && (
+                 <div className="mt-4 text-sm bg-yellow-900/50 border border-yellow-700 text-yellow-300 px-4 py-2 rounded-lg">
+                   <strong>Hinweis:</strong> Aus Videodateien wird nur die Audiospur für die Transkription verwendet.
+                 </div>
+               )}
+            </div>
+            <TranscriptionSettings
+                model={model}
+                onModelChange={setModel}
+                postProcessEnabled={postProcess}
+                onPostProcessChange={setPostProcess}
+            />
+        </>
       );
     }
 

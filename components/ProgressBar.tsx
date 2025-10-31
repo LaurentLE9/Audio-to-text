@@ -3,11 +3,11 @@ import React, { useState, useEffect, useRef } from 'react';
 
 interface ProgressBarProps {
   isComplete: boolean;
+  statusText: string;
 }
 
-const ProgressBar: React.FC<ProgressBarProps> = ({ isComplete }) => {
+const ProgressBar: React.FC<ProgressBarProps> = ({ isComplete, statusText }) => {
   const [progress, setProgress] = useState(0);
-  const [statusText, setStatusText] = useState('Vorbereitung...');
   const intervalRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -19,22 +19,9 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ isComplete }) => {
           return oldProgress;
         }
         
-        let increment;
-        if (oldProgress < 20) {
-          // Faster "upload" phase
-          increment = Math.random() * 5 + 5;
-          setStatusText('Datei wird hochgeladen...');
-        } else {
-          // Slower "transcription" phase
-          increment = Math.random() * 2 + 0.5;
-          setStatusText('Transkription wird erstellt...');
-        }
-
+        // Slower "transcription" phase
+        const increment = Math.random() * 2 + 0.5;
         const newProgress = Math.min(oldProgress + increment, 95);
-        
-        if (newProgress >= 95) {
-            setStatusText('Fast fertig...');
-        }
 
         return newProgress;
       });
@@ -53,14 +40,13 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ isComplete }) => {
       }
       // Animate to 100%
       setProgress(100);
-      setStatusText('Abgeschlossen!');
     }
   }, [isComplete]);
 
 
   return (
     <div className="flex flex-col items-center justify-center space-y-4 my-8 w-full px-4">
-      <p className="text-lg text-gray-300 font-medium">{statusText}</p>
+      <p className="text-lg text-gray-300 font-medium">{isComplete ? 'Abgeschlossen!' : statusText}</p>
       <div className="w-full bg-gray-700 rounded-full h-4 relative overflow-hidden border border-gray-600">
         <div 
           className="bg-indigo-500 h-full rounded-full transition-all duration-500 ease-out" 
