@@ -1,0 +1,5 @@
+{
+  "name": "Video-zu-Text Extraktor",
+  "description": "Eine Anwendung, die gesprochenen Text aus Audio- und Videodateien mithilfe der Gemini API extrahiert und als Textdatei ausgibt.",
+  "requestFramePermissions": []
+}
