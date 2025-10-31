@@ -1,3 +1,4 @@
+
 import React, { useCallback, useState } from 'react';
 import { UploadIcon } from './icons/UploadIcon';
 
@@ -5,7 +6,7 @@ interface FileUploaderProps {
   onFileChange: (file: File | null) => void;
 }
 
-const MAX_FILE_SIZE_MB = 15;
+const MAX_FILE_SIZE_MB = 100;
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 const FileUploader: React.FC<FileUploaderProps> = ({ onFileChange }) => {

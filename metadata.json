@@ -1,6 +1,6 @@
 {
   "name": "Video-zu-Text Extraktor",
-  "description": "Eine Anwendung, die gesprochenen Text aus Audio- und Videodateien mithilfe der Gemini API extrahiert und als Textdatei ausgibt.",
+  "description": "Eine Anwendung, die gesprochenen Text aus Audio- und Videodateien extrahiert und als Textdatei ausgibt. Unterstützt lokale Dateien, Mikrofonaufnahmen und Google Drive.",
   "requestFramePermissions": [
     "microphone"
   ]

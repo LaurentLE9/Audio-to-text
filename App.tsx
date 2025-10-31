@@ -1,6 +1,7 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
-import { transcribeAudio, postProcessTranscription } from './services/geminiService';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
+// FIX: Import `postProcessTranscription` to use for improving the transcription.
+import { transcribeMedia, postProcessTranscription, ProgressState } from './services/geminiService';
 import { fileToBase64 } from './utils/fileUtils';
 import FileUploader from './components/FileUploader';
 import TranscriptionDisplay from './components/TranscriptionDisplay';
@@ -8,15 +9,18 @@ import ProgressBar from './components/ProgressBar';
 import MicrophoneInput from './components/MicrophoneInput';
 import SavedTranscriptions from './components/SavedTranscriptions';
 import TranscriptionSettings from './components/TranscriptionSettings';
+import GoogleDrivePicker from './components/GoogleDrivePicker';
 import { FileAudioIcon } from './components/icons/FileAudioIcon';
 import { MicrophoneIcon } from './components/icons/MicrophoneIcon';
 import { UploadIcon } from './components/icons/UploadIcon';
 import { ArchiveIcon } from './components/icons/ArchiveIcon';
 import { SparklesIcon } from './components/icons/SparklesIcon';
+import { GoogleDriveIcon } from './components/icons/GoogleDriveIcon';
+import { uploadFile as uploadToDrive } from './services/googleDriveService';
 
 
 type Status = 'idle' | 'processing' | 'success' | 'error';
-type InputType = 'file' | 'microphone';
+type InputType = 'file' | 'microphone' | 'drive';
 type ActiveView = 'extractor' | 'saved';
 type Model = 'flash' | 'pro';
 
@@ -35,13 +39,26 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isTranscriptionComplete, setIsTranscriptionComplete] = useState(false);
   const [inputType, setInputType] = useState<InputType>('file');
+  const [googleAuthToken, setGoogleAuthToken] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<ActiveView>('extractor');
   const [savedTranscriptions, setSavedTranscriptions] = useState<Transcription[]>([]);
 
   // New state for settings
   const [model, setModel] = useState<Model>('flash');
   const [postProcess, setPostProcess] = useState(true);
-  const [statusText, setStatusText] = useState('Vorbereitung...');
+  const [progressInfo, setProgressInfo] = useState<ProgressState>({ status: 'Vorbereitung...', percentage: 0 });
+  
+  const apiKey = useMemo(() => process.env.API_KEY || '', []);
+  const isGoogleDriveEnabled = useMemo(() => !!process.env.GOOGLE_CLIENT_ID, []);
+
+
+  useEffect(() => {
+    // When the app loads or the feature is disabled, if the current input type
+    // is 'drive', reset it to 'file'.
+    if (!isGoogleDriveEnabled && inputType === 'drive') {
+      setInputType('file');
+    }
+  }, [isGoogleDriveEnabled, inputType]);
 
 
   useEffect(() => {
@@ -91,6 +108,15 @@ const App: React.FC = () => {
     }
   };
   
+  const handleSaveToDrive = useCallback(async () => {
+    if (!googleAuthToken || !transcription || !file) {
+      throw new Error("Bedingungen zum Speichern auf Drive nicht erfüllt.");
+    }
+    const baseName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
+    const driveFileName = `${baseName}_transkription.txt`;
+    await uploadToDrive(googleAuthToken, driveFileName, transcription);
+  }, [googleAuthToken, transcription, file]);
+
   const handleTranscription = useCallback(async () => {
     if (!file) {
       setError('Bitte wähle zuerst eine Datei aus oder erstelle eine Aufnahme.');
@@ -101,25 +127,28 @@ const App: React.FC = () => {
     setStatus('processing');
     setIsTranscriptionComplete(false);
     setError(null);
+    setProgressInfo({ status: 'Vorbereitung...', percentage: 0 });
 
     try {
-      const { base64Data, mimeType } = await fileToBase64(file);
-      
       const prompt = "Transkribiere den folgenden gesprochenen Text. Gib nur die Transkription aus, ohne zusätzliche Kommentare oder Formatierungen.";
-      
       const selectedModel = model === 'pro' ? 'gemini-2.5-pro' : 'gemini-2.5-flash';
+      
+      const handleProgress = (progress: ProgressState) => {
+        setProgressInfo(progress);
+      };
 
-      setStatusText('Transkription wird erstellt...');
-      let initialTranscription = await transcribeAudio(prompt, base64Data, mimeType, selectedModel);
-
+      let initialTranscription = await transcribeMedia(file, prompt, selectedModel, handleProgress);
+      
       let finalTranscription = initialTranscription;
       if (postProcess) {
-        setStatusText('Ergebnisse werden verbessert...');
+        setProgressInfo({ status: 'Ergebnisse werden verbessert...', percentage: 99 });
+        // FIX: Call `postProcessTranscription` instead of `transcribeMedia` for post-processing.
         finalTranscription = await postProcessTranscription(initialTranscription);
       }
-
+      
       setTranscription(finalTranscription);
       setIsTranscriptionComplete(true);
+      setProgressInfo({ status: 'Abgeschlossen!', percentage: 100 });
 
       // Allow time for the progress bar to animate to 100%
       setTimeout(() => {
@@ -151,7 +180,7 @@ const App: React.FC = () => {
 
   const renderExtractorContent = () => {
     if (status === 'processing') {
-      return <ProgressBar isComplete={isTranscriptionComplete} statusText={statusText} />;
+      return <ProgressBar isComplete={isTranscriptionComplete} progressInfo={progressInfo} />;
     }
 
     if (status === 'success') {
@@ -160,6 +189,8 @@ const App: React.FC = () => {
                 fileName={file?.name || 'transkription'} 
                 onReset={resetState}
                 onSave={handleSaveTranscription}
+                onSaveToDrive={isGoogleDriveEnabled ? handleSaveToDrive : undefined}
+                isDriveAuthenticated={!!googleAuthToken}
              />;
     }
 
@@ -205,11 +236,25 @@ const App: React.FC = () => {
                 <MicrophoneIcon className="w-5 h-5" />
                 Mikrofon
             </button>
+            {isGoogleDriveEnabled && (
+                <button 
+                    onClick={() => setInputType('drive')}
+                    className={`flex-1 py-3 text-center font-semibold transition-colors duration-300 flex items-center justify-center gap-2 ${inputType === 'drive' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-gray-400 hover:text-white'}`}
+                >
+                    <GoogleDriveIcon className="w-5 h-5" />
+                    Google Drive
+                </button>
+            )}
         </div>
-        {inputType === 'file' ? (
-          <FileUploader onFileChange={handleFileChange} />
-        ) : (
-          <MicrophoneInput onFileChange={handleFileChange} />
+        {inputType === 'file' && <FileUploader onFileChange={handleFileChange} />}
+        {inputType === 'microphone' && <MicrophoneInput onFileChange={handleFileChange} />}
+        {inputType === 'drive' && isGoogleDriveEnabled && (
+            <GoogleDrivePicker 
+                token={googleAuthToken} 
+                onTokenChange={setGoogleAuthToken} 
+                onFileChange={handleFileChange} 
+                apiKey={apiKey}
+            />
         )}
       </>
     );
